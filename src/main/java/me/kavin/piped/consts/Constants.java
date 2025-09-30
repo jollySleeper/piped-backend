@@ -80,6 +80,8 @@ public class Constants {
 
     public static final boolean CONSENT_COOKIE;
 
+    public static final boolean ENABLE_PERIODIC_CHANNEL_REFRESH;
+
     public static final String SENTRY_DSN;
 
     public static final String S3_ENDPOINT;
@@ -152,6 +154,7 @@ public class Constants {
             DISABLE_LBRY = Boolean.parseBoolean(getProperty(prop, "DISABLE_LBRY", "false"));
             SUBSCRIPTIONS_EXPIRY = Integer.parseInt(getProperty(prop, "SUBSCRIPTIONS_EXPIRY", "30"));
             CONSENT_COOKIE = Boolean.parseBoolean(getProperty(prop, "CONSENT_COOKIE", "true"));
+            ENABLE_PERIODIC_CHANNEL_REFRESH = Boolean.parseBoolean(getProperty(prop, "ENABLE_PERIODIC_CHANNEL_REFRESH", "false"));
             SENTRY_DSN = getProperty(prop, "SENTRY_DSN", "");
             S3_ENDPOINT = getProperty(prop, "S3_ENDPOINT");
             S3_ACCESS_KEY = getProperty(prop, "S3_ACCESS_KEY");
