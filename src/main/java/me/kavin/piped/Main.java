@@ -257,5 +257,50 @@ public class Main {
             }
         }, 0, TimeUnit.MINUTES.toMillis(60));
 
+                // Periodic channel refresh for feed updates (since PubSub only works for public instances)
+        // Only enabled for private self-hosted instances via ENABLE_PERIODIC_CHANNEL_REFRESH env variable
+        if (Constants.ENABLE_PERIODIC_CHANNEL_REFRESH) {
+            new Timer().scheduleAtFixedRate(new TimerTask() {
+                @Override
+                public void run() {
+                    try (StatelessSession s = DatabaseSessionFactory.createStatelessSession()) {
+
+                        // Get all subscribed channels from authenticated users and unauthenticated subscriptions
+                        List<String> channelIds = s.createNativeQuery("SELECT DISTINCT channel FROM users_subscribed UNION " +
+                                        "SELECT id FROM unauthenticated_subscriptions WHERE subscribed_at > :unauthSubbed", String.class)
+                                .setParameter("unauthSubbed", System.currentTimeMillis() - TimeUnit.DAYS.toMillis(Constants.SUBSCRIPTIONS_EXPIRY))
+                                .stream()
+                                .filter(Objects::nonNull)
+                                .distinct()
+                                .collect(Collectors.toCollection(ObjectArrayList::new));
+
+                        Collections.shuffle(channelIds);
+
+                        var queue = new ConcurrentLinkedQueue<>(channelIds);
+
+                        System.out.println("Channel refresh: queue size - " + queue.size() + " channels");
+
+                        for (int i = 0; i < Math.min(Runtime.getRuntime().availableProcessors(), channelIds.size()); i++) {
+                            new Thread(() -> {
+                                String channelId;
+                                while ((channelId = queue.poll()) != null) {
+                                    try {
+                                        DatabaseHelper.refreshChannelVideos(channelId);
+                                        // Small delay to avoid overwhelming YouTube
+                                        Thread.sleep(100);
+                                    } catch (Exception e) {
+                                        ExceptionHandler.handle(e);
+                                    }
+                                }
+                            }, "Channel-Refresh-" + i).start();
+                        }
+
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                    }
+                }
+            }, TimeUnit.MINUTES.toMillis(30), TimeUnit.HOURS.toMillis(6)); // Start after 30min, run every 6 hours
+        }
+
     }
 }
