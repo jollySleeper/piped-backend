@@ -236,4 +236,49 @@ public class DatabaseHelper {
 
         return channel;
     }
+
+    public static void refreshChannelVideos(String channelId) {
+        if (!ChannelHelpers.isValidId(channelId))
+            return;
+
+        try {
+            final ChannelInfo info = ChannelInfo.getInfo("https://youtube.com/channel/" + channelId);
+            final Channel channel = getChannelFromId(channelId);
+
+            if (channel == null)
+                return;
+
+            // Update channel info
+            try (StatelessSession s = DatabaseSessionFactory.createStatelessSession()) {
+                ChannelHelpers.updateChannel(s, channel, StringUtils.abbreviate(info.getName(), 100),
+                        info.getAvatars().isEmpty() ? null : info.getAvatars().getLast().getUrl(), info.isVerified());
+            }
+
+            // Fetch latest videos
+            CollectionUtils.collectPreloadedTabs(info.getTabs())
+                    .stream()
+                    .parallel()
+                    .mapMulti((tab, consumer) -> {
+                        try {
+                            ChannelTabInfo.getInfo(YOUTUBE_SERVICE, tab)
+                                    .getRelatedItems()
+                                    .forEach(consumer);
+                        } catch (ExtractionException | IOException e) {
+                            throw new RuntimeException(e);
+                        }
+                    })
+                    .filter(StreamInfoItem.class::isInstance)
+                    .map(StreamInfoItem.class::cast)
+                    .forEach(item -> {
+                        long time = item.getUploadDate() != null
+                                ? item.getUploadDate().offsetDateTime().toInstant().toEpochMilli()
+                                : System.currentTimeMillis();
+                        if ((System.currentTimeMillis() - time) < TimeUnit.DAYS.toMillis(Constants.FEED_RETENTION))
+                            VideoHelpers.handleNewVideo(item.getUrl(), time, channel);
+                    });
+
+        } catch (IOException | ExtractionException e) {
+            ExceptionHandler.handle(e);
+        }
+    }
 }
