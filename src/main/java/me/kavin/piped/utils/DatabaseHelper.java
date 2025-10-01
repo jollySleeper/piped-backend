@@ -53,23 +53,24 @@ public class DatabaseHelper {
         try (StatelessSession s = DatabaseSessionFactory.createStatelessSession()) {
             var tr = s.beginTransaction();
 
-            // First try to update existing record
-            int updated = s.createNativeMutationQuery(
-                    "UPDATE channel_refresh_tracking SET last_refreshed = ? WHERE channel_id = ?")
-                    .setParameter(1, timestamp)
-                    .setParameter(2, channelId)
-                    .executeUpdate();
-
-            // If no record was updated, insert a new one
-            if (updated == 0) {
+            try {
+                // Use UPSERT to handle concurrent access safely
+                // PostgreSQL, YugabyteDB, CockroachDB syntax
                 s.createNativeMutationQuery(
-                        "INSERT INTO channel_refresh_tracking (channel_id, last_refreshed) VALUES (?, ?)")
+                        "INSERT INTO channel_refresh_tracking (channel_id, last_refreshed) " +
+                                "VALUES (?, ?) " +
+                                "ON CONFLICT (channel_id) DO UPDATE SET last_refreshed = EXCLUDED.last_refreshed")
                         .setParameter(1, channelId)
                         .setParameter(2, timestamp)
                         .executeUpdate();
-            }
 
-            tr.commit();
+                tr.commit();
+            } catch (Exception e) {
+                if (tr != null && tr.isActive()) {
+                    tr.rollback();
+                }
+                throw e;
+            }
         } catch (Exception e) {
             ExceptionHandler.handle(e);
         }
