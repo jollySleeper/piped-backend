@@ -189,7 +189,7 @@ public class FeedHandlers {
         if (Constants.ENABLE_ON_DEMAND_REFRESH && !filteredChannels.isEmpty()) {
             // Batch check which channels need refresh (single DB query)
             Set<String> channelsNeedingRefresh = DatabaseHelper.getChannelsNeedingRefresh(
-                    filteredChannels, TimeUnit.MINUTES.toMillis(5));
+                    filteredChannels, TimeUnit.MINUTES.toMillis(Constants.CHANNEL_REFRESH_WINDOW_MINUTES));
 
             // Refresh only stale channels asynchronously
             channelsNeedingRefresh.forEach(channelId -> {
