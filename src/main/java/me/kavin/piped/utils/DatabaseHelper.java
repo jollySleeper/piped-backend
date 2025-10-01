@@ -28,6 +28,7 @@ public class DatabaseHelper {
     // Circuit breaker for YouTube API calls
     private static final AtomicInteger consecutiveRefreshFailures = new AtomicInteger(0);
     private static final int MAX_FAILURES_BEFORE_CIRCUIT_BREAK = 10;
+    private static final int CIRCUIT_BREAKER_RESET_MINUTES = 5; // Configurable cooldown period
     private static volatile long circuitBreakerResetTime = 0;
 
     /**
@@ -339,7 +340,7 @@ public class DatabaseHelper {
         // Circuit breaker check - prevent hammering YouTube when it's down
         if (consecutiveRefreshFailures.get() >= MAX_FAILURES_BEFORE_CIRCUIT_BREAK) {
             long now = System.currentTimeMillis();
-            // Reset circuit breaker after 5 minutes
+            // Reset circuit breaker after cooldown period
             if (now > circuitBreakerResetTime) {
                 System.out.println("Circuit breaker reset - attempting refresh again");
                 consecutiveRefreshFailures.set(0);
@@ -397,7 +398,7 @@ public class DatabaseHelper {
         } catch (IOException | ExtractionException e) {
             int failures = consecutiveRefreshFailures.incrementAndGet();
             if (failures >= MAX_FAILURES_BEFORE_CIRCUIT_BREAK) {
-                circuitBreakerResetTime = System.currentTimeMillis() + TimeUnit.MINUTES.toMillis(5);
+                circuitBreakerResetTime = System.currentTimeMillis() + TimeUnit.MINUTES.toMillis(CIRCUIT_BREAKER_RESET_MINUTES);
                 System.err.println("Circuit breaker opened after " + failures + " consecutive failures. Will reset at: " + new java.util.Date(circuitBreakerResetTime));
             }
             ExceptionHandler.handle(e);
