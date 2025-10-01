@@ -18,11 +18,17 @@ import org.schabi.newpipe.extractor.stream.StreamInfoItem;
 import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 import static me.kavin.piped.consts.Constants.YOUTUBE_SERVICE;
 
 public class DatabaseHelper {
+
+    // Circuit breaker for YouTube API calls
+    private static final AtomicInteger consecutiveRefreshFailures = new AtomicInteger(0);
+    private static final int MAX_FAILURES_BEFORE_CIRCUIT_BREAK = 10;
+    private static volatile long circuitBreakerResetTime = 0;
 
     /**
      * Check if a channel should be refreshed based on the last refresh time
@@ -330,6 +336,19 @@ public class DatabaseHelper {
         if (!ChannelHelpers.isValidId(channelId))
             return;
 
+        // Circuit breaker check - prevent hammering YouTube when it's down
+        if (consecutiveRefreshFailures.get() >= MAX_FAILURES_BEFORE_CIRCUIT_BREAK) {
+            long now = System.currentTimeMillis();
+            // Reset circuit breaker after 5 minutes
+            if (now > circuitBreakerResetTime) {
+                System.out.println("Circuit breaker reset - attempting refresh again");
+                consecutiveRefreshFailures.set(0);
+            } else {
+                System.err.println("Circuit breaker open - skipping channel refresh for: " + channelId);
+                return;
+            }
+        }
+
         // Validate channel exists in database before making YouTube API call
         final Channel channel = getChannelFromId(channelId);
         if (channel == null) {
@@ -372,7 +391,15 @@ public class DatabaseHelper {
                             VideoHelpers.handleNewVideo(item.getUrl(), time, channel);
                     });
 
+            // Reset failure count on success
+            consecutiveRefreshFailures.set(0);
+
         } catch (IOException | ExtractionException e) {
+            int failures = consecutiveRefreshFailures.incrementAndGet();
+            if (failures >= MAX_FAILURES_BEFORE_CIRCUIT_BREAK) {
+                circuitBreakerResetTime = System.currentTimeMillis() + TimeUnit.MINUTES.toMillis(5);
+                System.err.println("Circuit breaker opened after " + failures + " consecutive failures. Will reset at: " + new java.util.Date(circuitBreakerResetTime));
+            }
             ExceptionHandler.handle(e);
         }
     }
