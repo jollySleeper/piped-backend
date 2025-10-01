@@ -16,10 +16,9 @@ import org.schabi.newpipe.extractor.exceptions.ExtractionException;
 import org.schabi.newpipe.extractor.stream.StreamInfoItem;
 
 import java.io.IOException;
-import java.util.Collection;
-import java.util.List;
-import java.util.UUID;
+import java.util.*;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 import static me.kavin.piped.consts.Constants.YOUTUBE_SERVICE;
 
@@ -41,6 +40,45 @@ public class DatabaseHelper {
         } catch (Exception e) {
             ExceptionHandler.handle(e);
             return true; // On error, allow refresh
+        }
+    }
+
+    /**
+     * Batch check which channels need refreshing - efficient for large channel lists
+     * @param channelIds Set of channel IDs to check
+     * @param maxAgeMillis Maximum age in milliseconds (e.g., 5 minutes)
+     * @return Set of channel IDs that need refreshing
+     */
+    public static Set<String> getChannelsNeedingRefresh(Set<String> channelIds, long maxAgeMillis) {
+        if (channelIds.isEmpty()) {
+            return Set.of();
+        }
+
+        try (StatelessSession s = DatabaseSessionFactory.createStatelessSession()) {
+            long cutoffTime = System.currentTimeMillis() - maxAgeMillis;
+
+            // Fetch all refresh timestamps in one query
+            List<ChannelRefreshTracking> trackings = s.createQuery(
+                    "FROM ChannelRefreshTracking WHERE channelId IN :channelIds", 
+                    ChannelRefreshTracking.class)
+                    .setParameter("channelIds", channelIds)
+                    .getResultList();
+
+            // Build set of recently refreshed channels
+            Set<String> recentlyRefreshed = trackings.stream()
+                    .filter(t -> t.getLastRefreshed() > cutoffTime)
+                    .map(ChannelRefreshTracking::getChannelId)
+                    .collect(Collectors.toSet());
+
+            // Return channels that need refresh (not in recently refreshed set)
+            return channelIds.stream()
+                    .filter(id -> !recentlyRefreshed.contains(id))
+                    .collect(Collectors.toSet());
+
+        } catch (Exception e) {
+            ExceptionHandler.handle(e);
+            // On error, refresh all channels to be safe
+            return new HashSet<>(channelIds);
         }
     }
 

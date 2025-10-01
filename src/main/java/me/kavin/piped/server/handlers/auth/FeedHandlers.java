@@ -187,12 +187,14 @@ public class FeedHandlers {
 
         // Only refresh if ENABLE_ON_DEMAND_REFRESH is enabled
         if (Constants.ENABLE_ON_DEMAND_REFRESH && !filteredChannels.isEmpty()) {
-            filteredChannels.parallelStream().forEach(channelId -> {
+            // Batch check which channels need refresh (single DB query)
+            Set<String> channelsNeedingRefresh = DatabaseHelper.getChannelsNeedingRefresh(
+                    filteredChannels, TimeUnit.MINUTES.toMillis(5));
+
+            // Refresh only stale channels asynchronously
+            channelsNeedingRefresh.forEach(channelId -> {
                 Multithreading.runAsyncLimited(() -> {
-                    // Check if channel should be refreshed (not refreshed within last 5 minutes)
-                    if (DatabaseHelper.shouldRefreshChannel(channelId, TimeUnit.MINUTES.toMillis(5))) {
-                        DatabaseHelper.refreshChannelVideos(channelId);
-                    }
+                    DatabaseHelper.refreshChannelVideos(channelId);
                 });
             });
         }
