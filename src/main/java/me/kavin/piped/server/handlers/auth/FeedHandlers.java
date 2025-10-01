@@ -191,6 +191,11 @@ public class FeedHandlers {
             Set<String> channelsNeedingRefresh = DatabaseHelper.getChannelsNeedingRefresh(
                     filteredChannels, TimeUnit.MINUTES.toMillis(Constants.CHANNEL_REFRESH_WINDOW_MINUTES));
 
+            if (!channelsNeedingRefresh.isEmpty()) {
+                System.out.println("Experimental feed: triggering refresh for " + channelsNeedingRefresh.size() + 
+                        " of " + filteredChannels.size() + " channels");
+            }
+
             // Refresh only stale channels asynchronously
             channelsNeedingRefresh.forEach(channelId -> {
                 Multithreading.runAsyncLimited(() -> {
