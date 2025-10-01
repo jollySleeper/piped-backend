@@ -330,12 +330,15 @@ public class DatabaseHelper {
         if (!ChannelHelpers.isValidId(channelId))
             return;
 
+        // Validate channel exists in database before making YouTube API call
+        final Channel channel = getChannelFromId(channelId);
+        if (channel == null) {
+            System.err.println("Warning: Attempted to refresh non-existent channel: " + channelId);
+            return;
+        }
+
         try {
             final ChannelInfo info = ChannelInfo.getInfo("https://youtube.com/channel/" + channelId);
-            final Channel channel = getChannelFromId(channelId);
-
-            if (channel == null)
-                return;
 
             // Update channel info
             try (StatelessSession s = DatabaseSessionFactory.createStatelessSession()) {
