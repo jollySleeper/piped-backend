@@ -25,6 +25,56 @@ import static me.kavin.piped.consts.Constants.YOUTUBE_SERVICE;
 
 public class DatabaseHelper {
 
+    /**
+     * Check if a channel should be refreshed based on the last refresh time
+     * @param channelId The channel ID to check
+     * @param maxAgeMillis Maximum age in milliseconds (e.g., 5 minutes)
+     * @return true if the channel should be refreshed, false if it's still fresh
+     */
+    public static boolean shouldRefreshChannel(String channelId, long maxAgeMillis) {
+        try (StatelessSession s = DatabaseSessionFactory.createStatelessSession()) {
+            ChannelRefreshTracking tracking = s.get(ChannelRefreshTracking.class, channelId);
+            if (tracking == null) {
+                return true; // Never refreshed, should refresh
+            }
+            return (System.currentTimeMillis() - tracking.getLastRefreshed()) > maxAgeMillis;
+        } catch (Exception e) {
+            ExceptionHandler.handle(e);
+            return true; // On error, allow refresh
+        }
+    }
+
+    /**
+     * Update the last refresh time for a channel
+     * @param channelId The channel ID
+     * @param timestamp The timestamp when the channel was refreshed
+     */
+    public static void updateChannelRefreshTime(String channelId, long timestamp) {
+        try (StatelessSession s = DatabaseSessionFactory.createStatelessSession()) {
+            var tr = s.beginTransaction();
+
+            // First try to update existing record
+            int updated = s.createNativeMutationQuery(
+                    "UPDATE channel_refresh_tracking SET last_refreshed = ? WHERE channel_id = ?")
+                    .setParameter(1, timestamp)
+                    .setParameter(2, channelId)
+                    .executeUpdate();
+
+            // If no record was updated, insert a new one
+            if (updated == 0) {
+                s.createNativeMutationQuery(
+                        "INSERT INTO channel_refresh_tracking (channel_id, last_refreshed) VALUES (?, ?)")
+                        .setParameter(1, channelId)
+                        .setParameter(2, timestamp)
+                        .executeUpdate();
+            }
+
+            tr.commit();
+        } catch (Exception e) {
+            ExceptionHandler.handle(e);
+        }
+    }
+
     public static User getUserFromSession(String session) {
         try (StatelessSession s = DatabaseSessionFactory.createStatelessSession()) {
             return getUserFromSession(session, s);
@@ -235,5 +285,53 @@ public class DatabaseHelper {
         });
 
         return channel;
+    }
+
+    public static void refreshChannelVideos(String channelId) {
+        if (!ChannelHelpers.isValidId(channelId))
+            return;
+
+        try {
+            final ChannelInfo info = ChannelInfo.getInfo("https://youtube.com/channel/" + channelId);
+            final Channel channel = getChannelFromId(channelId);
+
+            if (channel == null)
+                return;
+
+            // Update channel info
+            try (StatelessSession s = DatabaseSessionFactory.createStatelessSession()) {
+                ChannelHelpers.updateChannel(s, channel, StringUtils.abbreviate(info.getName(), 100),
+                        info.getAvatars().isEmpty() ? null : info.getAvatars().getLast().getUrl(), info.isVerified());
+            }
+
+            // Update database with refresh timestamp
+            updateChannelRefreshTime(channelId, System.currentTimeMillis());
+
+            // Fetch latest videos (same logic as initial subscription)
+            CollectionUtils.collectPreloadedTabs(info.getTabs())
+                    .stream()
+                    .parallel()
+                    .mapMulti((tab, consumer) -> {
+                        try {
+                            ChannelTabInfo.getInfo(YOUTUBE_SERVICE, tab)
+                                    .getRelatedItems()
+                                    .forEach(consumer);
+                        } catch (ExtractionException | IOException e) {
+                            throw new RuntimeException(e);
+                        }
+                    })
+                    .filter(StreamInfoItem.class::isInstance)
+                    .map(StreamInfoItem.class::cast)
+                    .forEach(item -> {
+                        long time = item.getUploadDate() != null
+                                ? item.getUploadDate().offsetDateTime().toInstant().toEpochMilli()
+                                : System.currentTimeMillis();
+                        if ((System.currentTimeMillis() - time) < TimeUnit.DAYS.toMillis(Constants.FEED_RETENTION))
+                            VideoHelpers.handleNewVideo(item.getUrl(), time, channel);
+                    });
+
+        } catch (IOException | ExtractionException e) {
+            ExceptionHandler.handle(e);
+        }
     }
 }
