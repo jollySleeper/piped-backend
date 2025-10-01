@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                   xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+                   https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <changeSet id="3-0" author="rmali" runInTransaction="false">
+        <sql>
+            CREATE TABLE IF NOT EXISTS channel_refresh_tracking (
+                channel_id VARCHAR(24) NOT NULL UNIQUE,
+                last_refreshed INT8 NOT NULL,
+                CONSTRAINT channel_refresh_tracking_pkey PRIMARY KEY (channel_id)
+            );
+        </sql>
+        <sql>
+            CREATE INDEX IF NOT EXISTS channel_refresh_tracking_channel_id_idx ON channel_refresh_tracking (channel_id ASC);
+        </sql>
+        <rollback>
+            <sql>DROP TABLE IF EXISTS channel_refresh_tracking;</sql>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>
+
