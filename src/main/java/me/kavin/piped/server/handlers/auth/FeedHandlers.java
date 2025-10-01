@@ -176,6 +176,45 @@ public class FeedHandlers {
         }
     }
 
+    public static byte[] experimentalSubscriptionGroupFeedResponse(String[] channelIds) throws Exception {
+
+        Set<String> filteredChannels = Arrays.stream(channelIds)
+                .filter(ChannelHelpers::isValidId)
+                .collect(Collectors.toUnmodifiableSet());
+
+        if (filteredChannels.isEmpty())
+            return mapper.writeValueAsBytes(Collections.EMPTY_LIST);
+
+        // Only refresh if ENABLE_ON_DEMAND_REFRESH is enabled
+        if (Constants.ENABLE_ON_DEMAND_REFRESH && !filteredChannels.isEmpty()) {
+            filteredChannels.parallelStream().forEach(channelId -> {
+                Multithreading.runAsyncLimited(() -> {
+                    // Check if channel should be refreshed (not refreshed within last 5 minutes)
+                    if (DatabaseHelper.shouldRefreshChannel(channelId, TimeUnit.MINUTES.toMillis(5))) {
+                        DatabaseHelper.refreshChannelVideos(channelId);
+                    }
+                });
+            });
+        }
+
+        try (StatelessSession s = DatabaseSessionFactory.createStatelessSession()) {
+            List<StreamItem> feedItems = FeedHelpers.generateUnauthenticatedFeed(s, filteredChannels, Integer.MAX_VALUE)
+                    .parallel().map(video -> {
+                        var channel = video.getChannel();
+
+                        return new StreamItem("/watch?v=" + video.getId(), video.getTitle(),
+                                rewriteURL(video.getThumbnail()), channel.getUploader(), "/channel/" + channel.getUploaderId(),
+                                rewriteURL(channel.getUploaderAvatar()), null, null, video.getDuration(), video.getViews(),
+                                video.getUploaded(), channel.isVerified(), video.isShort());
+                    }).toList();
+
+            updateSubscribedTime(filteredChannels);
+            addMissingChannels(filteredChannels);
+
+            return mapper.writeValueAsBytes(feedItems);
+        }
+    }
+
     public static byte[] unauthenticatedFeedResponseRSS(String[] channelIds, @Nullable String filter) throws Exception {
 
         Set<String> filteredChannels = Arrays.stream(channelIds)
