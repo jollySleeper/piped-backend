@@ -33,6 +33,7 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import java.util.Set;
 
 import static me.kavin.piped.consts.Constants.*;
 
@@ -261,26 +262,53 @@ public class Main {
         // Only enabled for private self-hosted instances via ENABLE_PERIODIC_CHANNEL_REFRESH env variable
         if (Constants.ENABLE_PERIODIC_CHANNEL_REFRESH) {
             new Timer().scheduleAtFixedRate(new TimerTask() {
+                private volatile boolean isRunning = false;
+                
                 @Override
                 public void run() {
+                    // Prevent overlapping executions
+                    if (isRunning) {
+                        System.out.println("Channel refresh already running, skipping this cycle");
+                        return;
+                    }
+                    
+                    isRunning = true;
                     try (StatelessSession s = DatabaseSessionFactory.createStatelessSession()) {
 
                         // Get all subscribed channels from authenticated users and unauthenticated subscriptions
-                        List<String> channelIds = s.createNativeQuery("SELECT DISTINCT channel FROM users_subscribed UNION " +
-                                        "SELECT id FROM unauthenticated_subscriptions WHERE subscribed_at > :unauthSubbed", String.class)
+                        Set<String> allChannelIds = s.createNativeQuery(
+                                "SELECT DISTINCT channel FROM users_subscribed UNION " +
+                                "SELECT id FROM unauthenticated_subscriptions WHERE subscribed_at > :unauthSubbed", 
+                                String.class)
                                 .setParameter("unauthSubbed", System.currentTimeMillis() - TimeUnit.DAYS.toMillis(Constants.SUBSCRIPTIONS_EXPIRY))
                                 .stream()
                                 .filter(Objects::nonNull)
-                                .distinct()
-                                .collect(Collectors.toCollection(ObjectArrayList::new));
+                                .collect(Collectors.toSet());
 
-                        Collections.shuffle(channelIds);
+                        if (allChannelIds.isEmpty()) {
+                            System.out.println("Channel refresh: no subscribed channels found");
+                            return;
+                        }
 
-                        var queue = new ConcurrentLinkedQueue<>(channelIds);
+                        // Smart filtering: only refresh channels that haven't been refreshed recently
+                        Set<String> channelsNeedingRefresh = DatabaseHelper.getChannelsNeedingRefresh(
+                                allChannelIds, TimeUnit.HOURS.toMillis(Constants.CHANNEL_REFRESH_WINDOW_HOURS));
 
-                        System.out.println("Channel refresh: queue size - " + queue.size() + " channels");
+                        if (channelsNeedingRefresh.isEmpty()) {
+                            System.out.println("Channel refresh: all " + allChannelIds.size() + " channels are fresh");
+                            return;
+                        }
 
-                        for (int i = 0; i < Math.min(Runtime.getRuntime().availableProcessors(), channelIds.size()); i++) {
+                        System.out.printf("Channel refresh: %d of %d channels need refresh%n", 
+                                channelsNeedingRefresh.size(), allChannelIds.size());
+
+                        List<String> channelList = new ArrayList<>(channelsNeedingRefresh);
+                        Collections.shuffle(channelList);
+
+                        var queue = new ConcurrentLinkedQueue<>(channelList);
+
+                        int threadCount = Math.min(Runtime.getRuntime().availableProcessors(), channelList.size());
+                        for (int i = 0; i < threadCount; i++) {
                             new Thread(() -> {
                                 String channelId;
                                 while ((channelId = queue.poll()) != null) {
@@ -288,6 +316,9 @@ public class Main {
                                         DatabaseHelper.refreshChannelVideos(channelId);
                                         // Small delay to avoid overwhelming YouTube
                                         Thread.sleep(100);
+                                    } catch (InterruptedException e) {
+                                        Thread.currentThread().interrupt();
+                                        break; // Exit gracefully on interrupt
                                     } catch (Exception e) {
                                         ExceptionHandler.handle(e);
                                     }
@@ -297,6 +328,8 @@ public class Main {
 
                     } catch (Exception e) {
                         e.printStackTrace();
+                    } finally {
+                        isRunning = false;
                     }
                 }
             }, TimeUnit.MINUTES.toMillis(30), TimeUnit.HOURS.toMillis(6)); // Start after 30min, run every 6 hours
