@@ -16,14 +16,20 @@ import org.schabi.newpipe.extractor.exceptions.ExtractionException;
 import org.schabi.newpipe.extractor.stream.StreamInfoItem;
 
 import java.io.IOException;
-import java.util.Collection;
-import java.util.List;
-import java.util.UUID;
+import java.util.*;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
 
 import static me.kavin.piped.consts.Constants.YOUTUBE_SERVICE;
 
 public class DatabaseHelper {
+
+    // Circuit breaker for YouTube API calls
+    private static final AtomicInteger consecutiveRefreshFailures = new AtomicInteger(0);
+    private static final int MAX_FAILURES_BEFORE_CIRCUIT_BREAK = 10;
+    private static final int CIRCUIT_BREAKER_RESET_MINUTES = 5; // Configurable cooldown period
+    private static volatile long circuitBreakerResetTime = 0;
 
     public static User getUserFromSession(String session) {
         try (StatelessSession s = DatabaseSessionFactory.createStatelessSession()) {
@@ -241,12 +247,28 @@ public class DatabaseHelper {
         if (!ChannelHelpers.isValidId(channelId))
             return;
 
+        // Circuit breaker check - prevent hammering YouTube when it's down
+        if (consecutiveRefreshFailures.get() >= MAX_FAILURES_BEFORE_CIRCUIT_BREAK) {
+            long now = System.currentTimeMillis();
+            // Reset circuit breaker after cooldown period
+            if (now > circuitBreakerResetTime) {
+                System.out.println("Circuit breaker reset - attempting refresh again");
+                consecutiveRefreshFailures.set(0);
+            } else {
+                System.err.println("Circuit breaker open - skipping channel refresh for: " + channelId);
+                return;
+            }
+        }
+
+        // Validate channel exists in database before making YouTube API call
+        final Channel channel = getChannelFromId(channelId);
+        if (channel == null) {
+            System.err.println("Warning: Attempted to refresh non-existent channel: " + channelId);
+            return;
+        }
+
         try {
             final ChannelInfo info = ChannelInfo.getInfo("https://youtube.com/channel/" + channelId);
-            final Channel channel = getChannelFromId(channelId);
-
-            if (channel == null)
-                return;
 
             // Update channel info
             try (StatelessSession s = DatabaseSessionFactory.createStatelessSession()) {
@@ -254,7 +276,10 @@ public class DatabaseHelper {
                         info.getAvatars().isEmpty() ? null : info.getAvatars().getLast().getUrl(), info.isVerified());
             }
 
-            // Fetch latest videos
+            // Update database with refresh timestamp
+            updateChannelRefreshTime(channelId, System.currentTimeMillis());
+
+            // Fetch latest videos (same logic as initial subscription)
             CollectionUtils.collectPreloadedTabs(info.getTabs())
                     .stream()
                     .parallel()
@@ -277,7 +302,105 @@ public class DatabaseHelper {
                             VideoHelpers.handleNewVideo(item.getUrl(), time, channel);
                     });
 
+            // Reset failure count on success
+            consecutiveRefreshFailures.set(0);
+
         } catch (IOException | ExtractionException e) {
+            int failures = consecutiveRefreshFailures.incrementAndGet();
+            if (failures >= MAX_FAILURES_BEFORE_CIRCUIT_BREAK) {
+                circuitBreakerResetTime = System.currentTimeMillis() + TimeUnit.MINUTES.toMillis(CIRCUIT_BREAKER_RESET_MINUTES);
+                System.err.println("Circuit breaker opened after " + failures + " consecutive failures. Will reset at: " + new java.util.Date(circuitBreakerResetTime));
+            }
+            ExceptionHandler.handle(e);
+        }
+    }
+
+    /**
+     * Check if a channel should be refreshed based on the last refresh time
+     * @param channelId The channel ID to check
+     * @param maxAgeMillis Maximum age in milliseconds (e.g., 5 minutes)
+     * @return true if the channel should be refreshed, false if it's still fresh
+     */
+    public static boolean shouldRefreshChannel(String channelId, long maxAgeMillis) {
+        try (StatelessSession s = DatabaseSessionFactory.createStatelessSession()) {
+            ChannelRefreshTracking tracking = s.get(ChannelRefreshTracking.class, channelId);
+            if (tracking == null) {
+                return true; // Never refreshed, should refresh
+            }
+            return (System.currentTimeMillis() - tracking.getLastRefreshed()) > maxAgeMillis;
+        } catch (Exception e) {
+            ExceptionHandler.handle(e);
+            return true; // On error, allow refresh
+        }
+    }
+
+    /**
+     * Batch check which channels need refreshing - efficient for large channel lists
+     * @param channelIds Set of channel IDs to check
+     * @param maxAgeMillis Maximum age in milliseconds (e.g., 5 minutes)
+     * @return Set of channel IDs that need refreshing
+     */
+    public static Set<String> getChannelsNeedingRefresh(Set<String> channelIds, long maxAgeMillis) {
+        if (channelIds.isEmpty()) {
+            return Set.of();
+        }
+
+        try (StatelessSession s = DatabaseSessionFactory.createStatelessSession()) {
+            long cutoffTime = System.currentTimeMillis() - maxAgeMillis;
+
+            // Fetch all refresh timestamps in one query
+            List<ChannelRefreshTracking> trackings = s.createQuery(
+                    "FROM ChannelRefreshTracking WHERE channelId IN :channelIds", 
+                    ChannelRefreshTracking.class)
+                    .setParameter("channelIds", channelIds)
+                    .getResultList();
+
+            // Build set of recently refreshed channels
+            Set<String> recentlyRefreshed = trackings.stream()
+                    .filter(t -> t.getLastRefreshed() > cutoffTime)
+                    .map(ChannelRefreshTracking::getChannelId)
+                    .collect(Collectors.toSet());
+
+            // Return channels that need refresh (not in recently refreshed set)
+            return channelIds.stream()
+                    .filter(id -> !recentlyRefreshed.contains(id))
+                    .collect(Collectors.toSet());
+
+        } catch (Exception e) {
+            ExceptionHandler.handle(e);
+            // On error, refresh all channels to be safe
+            return new HashSet<>(channelIds);
+        }
+    }
+
+    /**
+     * Update the last refresh time for a channel
+     * @param channelId The channel ID
+     * @param timestamp The timestamp when the channel was refreshed
+     */
+    public static void updateChannelRefreshTime(String channelId, long timestamp) {
+        try (StatelessSession s = DatabaseSessionFactory.createStatelessSession()) {
+            var tr = s.beginTransaction();
+
+            try {
+                // Use UPSERT to handle concurrent access safely
+                // PostgreSQL, YugabyteDB, CockroachDB syntax
+                s.createNativeMutationQuery(
+                        "INSERT INTO channel_refresh_tracking (channel_id, last_refreshed) " +
+                                "VALUES (?, ?) " +
+                                "ON CONFLICT (channel_id) DO UPDATE SET last_refreshed = EXCLUDED.last_refreshed")
+                        .setParameter(1, channelId)
+                        .setParameter(2, timestamp)
+                        .executeUpdate();
+
+                tr.commit();
+            } catch (Exception e) {
+                if (tr != null && tr.isActive()) {
+                    tr.rollback();
+                }
+                throw e;
+            }
+        } catch (Exception e) {
             ExceptionHandler.handle(e);
         }
     }
