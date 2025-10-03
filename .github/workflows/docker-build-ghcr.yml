@@ -1,9 +1,6 @@
 name: Docker Multi-Architecture Build (GHCR)
 
 on:
-  push:
-    paths-ignore:
-      - "**.md"
   workflow_dispatch:
 
 permissions:
@@ -40,6 +37,13 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Prepare repository name
+        id: prep
+        run: |
+          OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          REPO=$(echo "${{ github.event.repository.name }}" | tr '[:upper:]' '[:lower:]')
+          echo "owner=$OWNER" >> $GITHUB_OUTPUT
+          echo "repo=$REPO" >> $GITHUB_OUTPUT
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
@@ -48,8 +52,7 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            ghcr.io/${{ github.repository }}:latest
-            # ghcr.io/${{ github.repository }}:azul-zulu
-            ghcr.io/${{ github.repository }}:${{ github.ref_name }}
+            ghcr.io/${{ steps.prep.outputs.owner }}/${{ steps.prep.outputs.repo }}:latest
+            ghcr.io/${{ steps.prep.outputs.owner }}/${{ steps.prep.outputs.repo }}:${{ github.ref_name }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
