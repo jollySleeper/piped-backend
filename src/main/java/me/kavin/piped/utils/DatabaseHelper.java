@@ -267,6 +267,9 @@ public class DatabaseHelper {
             return;
         }
 
+        // Mark channel as "in progress" with -1 to prevent duplicate concurrent refreshes
+        updateChannelRefreshTime(channelId, -1);
+
         try {
             final ChannelInfo info = ChannelInfo.getInfo("https://youtube.com/channel/" + channelId);
 
@@ -275,9 +278,6 @@ public class DatabaseHelper {
                 ChannelHelpers.updateChannel(s, channel, StringUtils.abbreviate(info.getName(), 100),
                         info.getAvatars().isEmpty() ? null : info.getAvatars().getLast().getUrl(), info.isVerified());
             }
-
-            // Update database with refresh timestamp
-            updateChannelRefreshTime(channelId, System.currentTimeMillis());
 
             // Fetch latest videos (same logic as initial subscription)
             CollectionUtils.collectPreloadedTabs(info.getTabs())
@@ -302,10 +302,16 @@ public class DatabaseHelper {
                             VideoHelpers.handleNewVideo(item.getUrl(), time, channel);
                     });
 
+            // Update database with actual refresh timestamp after successful completion
+            updateChannelRefreshTime(channelId, System.currentTimeMillis());
+
             // Reset failure count on success
             consecutiveRefreshFailures.set(0);
 
         } catch (IOException | ExtractionException e) {
+            // On failure, clear the "in progress" marker so channel can be retried later
+            updateChannelRefreshTime(channelId, System.currentTimeMillis() - TimeUnit.HOURS.toMillis(Constants.CHANNEL_REFRESH_WINDOW_HOURS));
+            
             int failures = consecutiveRefreshFailures.incrementAndGet();
             if (failures >= MAX_FAILURES_BEFORE_CIRCUIT_BREAK) {
                 circuitBreakerResetTime = System.currentTimeMillis() + TimeUnit.MINUTES.toMillis(CIRCUIT_BREAKER_RESET_MINUTES);
@@ -355,15 +361,17 @@ public class DatabaseHelper {
                     .setParameter("channelIds", channelIds)
                     .getResultList();
 
-            // Build set of recently refreshed channels
-            Set<String> recentlyRefreshed = trackings.stream()
-                    .filter(t -> t.getLastRefreshed() > cutoffTime)
+            // Build set of channels that are fresh or currently being refreshed
+            // Fresh = lastRefreshed > cutoffTime
+            // In progress = lastRefreshed == -1
+            Set<String> skipChannels = trackings.stream()
+                    .filter(t -> t.getLastRefreshed() > cutoffTime || t.getLastRefreshed() == -1)
                     .map(ChannelRefreshTracking::getChannelId)
                     .collect(Collectors.toSet());
 
-            // Return channels that need refresh (not in recently refreshed set)
+            // Return channels that need refresh (not in skip set)
             return channelIds.stream()
-                    .filter(id -> !recentlyRefreshed.contains(id))
+                    .filter(id -> !skipChannels.contains(id))
                     .collect(Collectors.toSet());
 
         } catch (Exception e) {
