@@ -1,6 +1,14 @@
 name: Docker Multi-Architecture Build (GHCR)
 
 on:
+  push:
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "*.txt"
+    branches:
+      - 'master'
+      - 'feature/**'
   workflow_dispatch:
 
 permissions:
