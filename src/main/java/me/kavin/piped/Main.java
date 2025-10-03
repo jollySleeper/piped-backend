@@ -258,7 +258,7 @@ public class Main {
             }
         }, 0, TimeUnit.MINUTES.toMillis(60));
 
-                // Periodic channel refresh for feed updates (since PubSub only works for public instances)
+        // Periodic channel refresh for feed updates (since PubSub only works for public instances)
         // Only enabled for private self-hosted instances via ENABLE_PERIODIC_CHANNEL_REFRESH env variable
         if (Constants.ENABLE_PERIODIC_CHANNEL_REFRESH) {
             new Timer().scheduleAtFixedRate(new TimerTask() {
@@ -332,7 +332,8 @@ public class Main {
                         isRunning = false;
                     }
                 }
-            }, TimeUnit.MINUTES.toMillis(30), TimeUnit.HOURS.toMillis(6)); // Start after 30min, run every 6 hours
+            }, TimeUnit.MINUTES.toMillis(Constants.CHANNEL_REFRESH_INITIAL_DELAY_MINUTES), 
+               TimeUnit.HOURS.toMillis(Constants.CHANNEL_REFRESH_WINDOW_HOURS)); // Configurable initial delay and interval
         }
 
     }
