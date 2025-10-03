@@ -84,6 +84,8 @@ public class Constants {
 
     public static final long CHANNEL_REFRESH_WINDOW_HOURS;
 
+    public static final long CHANNEL_REFRESH_INITIAL_DELAY_MINUTES;
+
     public static final String SENTRY_DSN;
 
     public static final String S3_ENDPOINT;
@@ -158,6 +160,7 @@ public class Constants {
             CONSENT_COOKIE = Boolean.parseBoolean(getProperty(prop, "CONSENT_COOKIE", "true"));
             ENABLE_PERIODIC_CHANNEL_REFRESH = Boolean.parseBoolean(getProperty(prop, "ENABLE_PERIODIC_CHANNEL_REFRESH", "false"));
             CHANNEL_REFRESH_WINDOW_HOURS = Long.parseLong(getProperty(prop, "CHANNEL_REFRESH_WINDOW_HOURS", "6"));
+            CHANNEL_REFRESH_INITIAL_DELAY_MINUTES = Long.parseLong(getProperty(prop, "CHANNEL_REFRESH_INITIAL_DELAY_MINUTES", "30"));
             SENTRY_DSN = getProperty(prop, "SENTRY_DSN", "");
             S3_ENDPOINT = getProperty(prop, "S3_ENDPOINT");
             S3_ACCESS_KEY = getProperty(prop, "S3_ACCESS_KEY");
