@@ -272,7 +272,7 @@ public class DatabaseHelper {
 
         // Mark channel as "in progress" with -1 to prevent duplicate concurrent refreshes
         updateChannelRefreshTime(channelId, -1);
-        System.out.println("  [REFRESH] Starting: " + channelId + " (" + channel.getName() + ")");
+        System.out.println("  [REFRESH] Starting: " + channelId + " (" + channel.getUploader() + ")");
 
         try {
             final ChannelInfo info = ChannelInfo.getInfo("https://youtube.com/channel/" + channelId);
@@ -308,7 +308,7 @@ public class DatabaseHelper {
 
             // Update database with actual refresh timestamp after successful completion
             updateChannelRefreshTime(channelId, System.currentTimeMillis());
-            System.out.println("  [SUCCESS] Completed: " + channelId + " (" + channel.getName() + ")");
+            System.out.println("  [SUCCESS] Completed: " + channelId + " (" + channel.getUploader() + ")");
 
             // Reset failure count on success
             consecutiveRefreshFailures.set(0);
