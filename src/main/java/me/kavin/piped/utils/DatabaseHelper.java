@@ -244,21 +244,18 @@ public class DatabaseHelper {
     }
 
     public static void refreshChannelVideos(String channelId) {
-        if (!ChannelHelpers.isValidId(channelId)) {
-            System.err.println("  [SKIP] Invalid channel ID: " + channelId);
+        if (!ChannelHelpers.isValidId(channelId))
             return;
-        }
 
         // Circuit breaker check - prevent hammering YouTube when it's down
         if (consecutiveRefreshFailures.get() >= MAX_FAILURES_BEFORE_CIRCUIT_BREAK) {
             long now = System.currentTimeMillis();
             // Reset circuit breaker after cooldown period
             if (now > circuitBreakerResetTime) {
-                System.out.println("🔄 Circuit breaker RESET - attempting refresh again");
+                System.out.println("Circuit breaker reset - attempting refresh again");
                 consecutiveRefreshFailures.set(0);
             } else {
-                long remainingSeconds = (circuitBreakerResetTime - now) / 1000;
-                System.err.println("⛔ Circuit breaker OPEN - skipping " + channelId + " (resets in " + remainingSeconds + "s)");
+                System.err.println("Circuit breaker open - skipping channel refresh for: " + channelId);
                 return;
             }
         }
@@ -266,13 +263,12 @@ public class DatabaseHelper {
         // Validate channel exists in database before making YouTube API call
         final Channel channel = getChannelFromId(channelId);
         if (channel == null) {
-            System.err.println("  [ERROR] Channel not found in database: " + channelId);
+            System.err.println("Warning: Attempted to refresh non-existent channel: " + channelId);
             return;
         }
 
         // Mark channel as "in progress" with -1 to prevent duplicate concurrent refreshes
         updateChannelRefreshTime(channelId, -1);
-        System.out.println("  [REFRESH] Starting: " + channelId + " (" + channel.getName() + ")");
 
         try {
             final ChannelInfo info = ChannelInfo.getInfo("https://youtube.com/channel/" + channelId);
@@ -308,7 +304,6 @@ public class DatabaseHelper {
 
             // Update database with actual refresh timestamp after successful completion
             updateChannelRefreshTime(channelId, System.currentTimeMillis());
-            System.out.println("  [SUCCESS] Completed: " + channelId + " (" + channel.getName() + ")");
 
             // Reset failure count on success
             consecutiveRefreshFailures.set(0);
@@ -316,16 +311,11 @@ public class DatabaseHelper {
         } catch (IOException | ExtractionException e) {
             // On failure, clear the "in progress" marker so channel can be retried later
             updateChannelRefreshTime(channelId, System.currentTimeMillis() - TimeUnit.HOURS.toMillis(Constants.CHANNEL_REFRESH_WINDOW_HOURS));
-            System.err.println("  [FAILED] " + channelId + ": " + e.getMessage());
             
             int failures = consecutiveRefreshFailures.incrementAndGet();
             if (failures >= MAX_FAILURES_BEFORE_CIRCUIT_BREAK) {
                 circuitBreakerResetTime = System.currentTimeMillis() + TimeUnit.MINUTES.toMillis(CIRCUIT_BREAKER_RESET_MINUTES);
-                System.err.println("⛔ CIRCUIT BREAKER OPENED after " + failures + " consecutive failures!");
-                System.err.println("   Will reset at: " + new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new java.util.Date(circuitBreakerResetTime)));
-                System.err.println("   Reason: Preventing YouTube API abuse/ban");
-            } else {
-                System.err.println("   Consecutive failures: " + failures + "/" + MAX_FAILURES_BEFORE_CIRCUIT_BREAK);
+                System.err.println("Circuit breaker opened after " + failures + " consecutive failures. Will reset at: " + new java.util.Date(circuitBreakerResetTime));
             }
             ExceptionHandler.handle(e);
         }

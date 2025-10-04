@@ -261,34 +261,19 @@ public class Main {
         // Periodic channel refresh for feed updates (since PubSub only works for public instances)
         // Only enabled for private self-hosted instances via ENABLE_PERIODIC_CHANNEL_REFRESH env variable
         if (Constants.ENABLE_PERIODIC_CHANNEL_REFRESH) {
-            System.out.println("=== Channel Refresh Feature ENABLED ===");
-            System.out.printf("  Initial delay: %d minutes%n", Constants.CHANNEL_REFRESH_INITIAL_DELAY_MINUTES);
-            System.out.printf("  Refresh interval: %d hours%n", Constants.CHANNEL_REFRESH_WINDOW_HOURS);
-            System.out.printf("  Next refresh at: %s%n", 
-                new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(
-                    new java.util.Date(System.currentTimeMillis() + TimeUnit.MINUTES.toMillis(Constants.CHANNEL_REFRESH_INITIAL_DELAY_MINUTES))));
-            
             new Timer().scheduleAtFixedRate(new TimerTask() {
                 private volatile boolean isRunning = false;
                 
                 @Override
                 public void run() {
-                    long startTime = System.currentTimeMillis();
-                    System.out.println("\n=== Channel Refresh Task Started ===");
-                    System.out.printf("Time: %s%n", new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new java.util.Date()));
-                    
                     // Prevent overlapping executions
                     if (isRunning) {
-                        System.out.println("⚠️  Channel refresh already running, skipping this cycle");
+                        System.out.println("Channel refresh already running, skipping this cycle");
                         return;
                     }
                     
                     isRunning = true;
-                    int successCount = 0;
-                    int failureCount = 0;
-                    
                     try (StatelessSession s = DatabaseSessionFactory.createStatelessSession()) {
-                        System.out.println("Step 1: Querying database for subscribed channels...");
 
                         // Get all subscribed channels from authenticated users and unauthenticated subscriptions
                         Set<String> allChannelIds = s.createNativeQuery(
@@ -300,96 +285,55 @@ public class Main {
                                 .filter(Objects::nonNull)
                                 .collect(Collectors.toSet());
 
-                        System.out.printf("  Found %d total subscribed channels%n", allChannelIds.size());
-
                         if (allChannelIds.isEmpty()) {
-                            System.out.println("⚠️  No subscribed channels found, nothing to refresh");
+                            System.out.println("Channel refresh: no subscribed channels found");
                             return;
                         }
 
-                        System.out.println("Step 2: Checking which channels need refresh...");
                         // Smart filtering: only refresh channels that haven't been refreshed recently
                         Set<String> channelsNeedingRefresh = DatabaseHelper.getChannelsNeedingRefresh(
                                 allChannelIds, TimeUnit.HOURS.toMillis(Constants.CHANNEL_REFRESH_WINDOW_HOURS));
 
-                        System.out.printf("  %d channels need refresh (stale or never refreshed)%n", channelsNeedingRefresh.size());
-                        System.out.printf("  %d channels are fresh (skip)%n", allChannelIds.size() - channelsNeedingRefresh.size());
-
                         if (channelsNeedingRefresh.isEmpty()) {
-                            System.out.printf("✅ All %d channels are fresh, nothing to do%n", allChannelIds.size());
+                            System.out.println("Channel refresh: all " + allChannelIds.size() + " channels are fresh");
                             return;
                         }
 
-                        System.out.printf("Step 3: Refreshing %d of %d channels...%n", 
+                        System.out.printf("Channel refresh: %d of %d channels need refresh%n", 
                                 channelsNeedingRefresh.size(), allChannelIds.size());
 
                         List<String> channelList = new ArrayList<>(channelsNeedingRefresh);
                         Collections.shuffle(channelList);
 
                         var queue = new ConcurrentLinkedQueue<>(channelList);
-                        
+
                         int threadCount = Math.min(Runtime.getRuntime().availableProcessors(), channelList.size());
-                        System.out.printf("  Using %d worker threads%n", threadCount);
-                        
-                        final java.util.concurrent.atomic.AtomicInteger processedCount = new java.util.concurrent.atomic.AtomicInteger(0);
-                        final java.util.concurrent.atomic.AtomicInteger localSuccessCount = new java.util.concurrent.atomic.AtomicInteger(0);
-                        final java.util.concurrent.atomic.AtomicInteger localFailureCount = new java.util.concurrent.atomic.AtomicInteger(0);
-                        
                         for (int i = 0; i < threadCount; i++) {
                             new Thread(() -> {
                                 String channelId;
                                 while ((channelId = queue.poll()) != null) {
                                     try {
-                                        int current = processedCount.incrementAndGet();
-                                        if (current % 10 == 0 || current == channelsNeedingRefresh.size()) {
-                                            System.out.printf("  Progress: %d/%d channels processed%n", current, channelsNeedingRefresh.size());
-                                        }
                                         DatabaseHelper.refreshChannelVideos(channelId);
-                                        localSuccessCount.incrementAndGet();
                                         // Small delay to avoid overwhelming YouTube
                                         Thread.sleep(100);
                                     } catch (InterruptedException e) {
                                         Thread.currentThread().interrupt();
                                         break; // Exit gracefully on interrupt
                                     } catch (Exception e) {
-                                        localFailureCount.incrementAndGet();
                                         ExceptionHandler.handle(e);
                                     }
                                 }
                             }, "Channel-Refresh-" + i).start();
                         }
-                        
-                        // Wait for all threads to complete (with timeout)
-                        int waitCount = 0;
-                        while (processedCount.get() < channelsNeedingRefresh.size() && waitCount < 600) { // Max 60 seconds wait
-                            Thread.sleep(100);
-                            waitCount++;
-                        }
-                        
-                        successCount = localSuccessCount.get();
-                        failureCount = localFailureCount.get();
 
                     } catch (Exception e) {
-                        System.err.println("❌ Error in channel refresh task:");
                         e.printStackTrace();
                     } finally {
                         isRunning = false;
-                        long duration = System.currentTimeMillis() - startTime;
-                        System.out.println("\n=== Channel Refresh Task Completed ===");
-                        System.out.printf("  Duration: %.2f seconds%n", duration / 1000.0);
-                        System.out.printf("  Success: %d channels%n", successCount);
-                        System.out.printf("  Failures: %d channels%n", failureCount);
-                        System.out.printf("  Next refresh at: %s%n", 
-                            new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(
-                                new java.util.Date(System.currentTimeMillis() + TimeUnit.HOURS.toMillis(Constants.CHANNEL_REFRESH_WINDOW_HOURS))));
-                        System.out.println("========================================\n");
                     }
                 }
             }, TimeUnit.MINUTES.toMillis(Constants.CHANNEL_REFRESH_INITIAL_DELAY_MINUTES), 
                TimeUnit.HOURS.toMillis(Constants.CHANNEL_REFRESH_WINDOW_HOURS)); // Configurable initial delay and interval
-        } else {
-            System.out.println("=== Channel Refresh Feature DISABLED ===");
-            System.out.println("  To enable: Set ENABLE_PERIODIC_CHANNEL_REFRESH=true in config.properties");
         }
 
     }
