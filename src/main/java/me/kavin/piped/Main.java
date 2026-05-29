@@ -122,7 +122,7 @@ public class Main {
         if (Constants.DISABLE_TIMERS)
             return;
 
-        new Timer().scheduleAtFixedRate(new TimerTask() {
+        if (!Constants.DISABLE_PUBSUB) new Timer().scheduleAtFixedRate(new TimerTask() {
             @Override
             public void run() {
                 try (StatelessSession s = DatabaseSessionFactory.createStatelessSession()) {
@@ -181,7 +181,7 @@ public class Main {
             }
         }, 0, TimeUnit.MINUTES.toMillis(90));
 
-        new Timer().scheduleAtFixedRate(new TimerTask() {
+        if (!Constants.DISABLE_PUBSUB) new Timer().scheduleAtFixedRate(new TimerTask() {
             @Override
             public void run() {
                 try (StatelessSession s = DatabaseSessionFactory.createStatelessSession()) {

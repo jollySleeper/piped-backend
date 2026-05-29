@@ -202,7 +202,7 @@ public class DatabaseHelper {
             ExceptionHandler.handle(e);
         }
 
-        Multithreading.runAsync(() -> {
+        if (!Constants.DISABLE_PUBSUB) Multithreading.runAsync(() -> {
             try {
                 PubSubHelper.subscribePubSub(channelId);
             } catch (IOException e) {
