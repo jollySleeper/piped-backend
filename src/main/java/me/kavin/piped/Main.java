@@ -18,6 +18,7 @@ import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.hibernate.Session;
 import org.hibernate.StatelessSession;
 import org.schabi.newpipe.extractor.NewPipe;
+import org.schabi.newpipe.extractor.channel.ChannelInfo;
 import org.schabi.newpipe.extractor.localization.ContentCountry;
 import org.schabi.newpipe.extractor.localization.Localization;
 import org.schabi.newpipe.extractor.services.youtube.YoutubeJavaScriptPlayerManager;
@@ -122,7 +123,7 @@ public class Main {
         if (Constants.DISABLE_TIMERS)
             return;
 
-        new Timer().scheduleAtFixedRate(new TimerTask() {
+        if (!Constants.DISABLE_PUBSUB) new Timer().scheduleAtFixedRate(new TimerTask() {
             @Override
             public void run() {
                 try (StatelessSession s = DatabaseSessionFactory.createStatelessSession()) {
@@ -181,7 +182,7 @@ public class Main {
             }
         }, 0, TimeUnit.MINUTES.toMillis(90));
 
-        new Timer().scheduleAtFixedRate(new TimerTask() {
+        if (!Constants.DISABLE_PUBSUB) new Timer().scheduleAtFixedRate(new TimerTask() {
             @Override
             public void run() {
                 try (StatelessSession s = DatabaseSessionFactory.createStatelessSession()) {
@@ -256,6 +257,54 @@ public class Main {
                 }
             }
         }, 0, TimeUnit.MINUTES.toMillis(60));
+
+        if (Constants.FEED_REFRESH)
+            Thread.ofVirtual().name("feed-refresh").start(() -> {
+                while (true) {
+                    try {
+                        List<String> channelIds;
+                        try (StatelessSession s = DatabaseSessionFactory.createStatelessSession()) {
+                            channelIds = s.createNativeQuery("SELECT DISTINCT channel FROM users_subscribed", String.class)
+                                    .stream()
+                                    .filter(Objects::nonNull)
+                                    .distinct()
+                                    .collect(Collectors.toCollection(ObjectArrayList::new));
+                        }
+
+                        long periodMs = TimeUnit.MINUTES.toMillis(Constants.FEED_REFRESH_MINUTES);
+                        long delay = channelIds.isEmpty() ? periodMs : Math.max(1, periodMs / channelIds.size());
+
+                        System.out.println("FeedRefresh: " + channelIds.size() + " channels, one every " + delay + "ms");
+
+                        for (String channelId : channelIds) {
+                            try {
+                                var info = ChannelInfo.getInfo("https://youtube.com/channel/" + channelId);
+                                var tabInfo = ChannelHelpers.videosTabInfo(info);
+                                if (tabInfo != null)
+                                    Multithreading.runAsync(() -> ChannelHelpers.federateChannelVideos(tabInfo));
+                                Multithreading.runAsync(() -> ChannelHelpers.federateChannelInfo(info));
+                                if (tabInfo != null)
+                                    ChannelHelpers.updateChannelVideos(info, tabInfo);
+                            } catch (Exception e) {
+                                ExceptionHandler.handle(e);
+                            }
+                            Thread.sleep(delay);
+                        }
+
+                        if (channelIds.isEmpty())
+                            Thread.sleep(periodMs);
+                    } catch (InterruptedException e) {
+                        break;
+                    } catch (Exception e) {
+                        ExceptionHandler.handle(e);
+                        try {
+                            Thread.sleep(TimeUnit.MINUTES.toMillis(1));
+                        } catch (InterruptedException ie) {
+                            break;
+                        }
+                    }
+                }
+            });
 
     }
 }
