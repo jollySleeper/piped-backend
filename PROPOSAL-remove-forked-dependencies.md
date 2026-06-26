@@ -13,7 +13,7 @@ This document proposes switching to the official upstream repositories:
 
 ```gradle
 implementation 'com.github.TeamNewPipe:NewPipeExtractor:v0.26.3'
-implementation 'com.github.TeamNewPipe:nanojson:e9d656ddb49a412a5a0a5d5ef20ca7ef09549996'
+implementation 'com.github.TeamNewPipe:nanojson:c7a6c1c08d16b6d5ecded34758e6415e07be2166'
 ```
 
 ## The Problem
@@ -89,7 +89,7 @@ Piped-Backend uses only standard extractor APIs: `StreamInfo.getInfo()`, `stream
 -    implementation 'com.github.FireMasterK:NewPipeExtractor:c83884eb5d2e9f077348acec3a2d9e9dc920ae91'
 -    implementation 'com.github.FireMasterK:nanojson:a507525e549a836c3a8b6ab7090dca38e92942ef'
 +    implementation 'com.github.TeamNewPipe:NewPipeExtractor:v0.26.3'
-+    implementation 'com.github.TeamNewPipe:nanojson:e9d656ddb49a412a5a0a5d5ef20ca7ef09549996'
++    implementation 'com.github.TeamNewPipe:nanojson:c7a6c1c08d16b6d5ecded34758e6415e07be2166'
 ```
 
 ### `renovate.json` (remove fork-specific overrides)
