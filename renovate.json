@@ -28,13 +28,9 @@
     },
     {
       "matchPackagePrefixes": [
-        "com.github.firemasterk."
+        "com.github.TeamNewPipe"
       ],
-      "groupName": "Personal Forks",
-      "enabled": false
+      "groupName": "NewPipe"
     }
-  ],
-  "ignoreDeps": [
-    "com.github.FireMasterK.NewPipeExtractor:NewPipeExtractor"
   ]
 }
