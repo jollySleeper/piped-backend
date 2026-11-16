@@ -12,7 +12,7 @@ implementation 'com.github.FireMasterK:nanojson:a507525e549a...'
 This document proposes switching to the official upstream repositories:
 
 ```gradle
-implementation 'com.github.TeamNewPipe:NewPipeExtractor:v0.26.3'
+implementation 'com.github.TeamNewPipe:NewPipeExtractor:v0.27.1'
 implementation 'com.github.TeamNewPipe:nanojson:c7a6c1c08d16b6d5ecded34758e6415e07be2166'
 ```
 
@@ -79,7 +79,7 @@ Piped-Backend uses only standard extractor APIs: `StreamInfo.getInfo()`, `stream
 1. **40+ upstream commits** currently missing: visionOS client fallback, improved lockup extraction, better livestream/HLS handling, SoundCloud fixes, dependency bumps, protobuf-based audio track parsing, and more.
 2. **Renovate can auto-track updates** — no manual hash bumping required.
 3. **No single-person bottleneck** — upstream has multiple active contributors and a release cadence.
-4. **Latest release** (v0.26.3, June 9 2026) is well-tested by the NewPipe user base.
+4. **Latest release** (v0.27.1, Nov 10 2026) is well-tested by the NewPipe user base.
 
 ## The Change
 
@@ -88,7 +88,7 @@ Piped-Backend uses only standard extractor APIs: `StreamInfo.getInfo()`, `stream
 ```diff
 -    implementation 'com.github.FireMasterK:NewPipeExtractor:c83884eb5d2e9f077348acec3a2d9e9dc920ae91'
 -    implementation 'com.github.FireMasterK:nanojson:a507525e549a836c3a8b6ab7090dca38e92942ef'
-+    implementation 'com.github.TeamNewPipe:NewPipeExtractor:v0.26.3'
++    implementation 'com.github.TeamNewPipe:NewPipeExtractor:v0.27.1'
 +    implementation 'com.github.TeamNewPipe:nanojson:c7a6c1c08d16b6d5ecded34758e6415e07be2166'
 ```
 

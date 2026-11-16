@@ -85,18 +85,4 @@ public class BgPoTokenProvider implements PoTokenProvider {
         return null;
     }
 
-    @Override
-    public @Nullable PoTokenResult getWebEmbedClientPoToken(String videoId) {
-        return null;
-    }
-
-    @Override
-    public @Nullable PoTokenResult getAndroidClientPoToken(String videoId) {
-        return null;
-    }
-
-    @Override
-    public @Nullable PoTokenResult getIosClientPoToken(String videoId) {
-        return null;
-    }
 }
